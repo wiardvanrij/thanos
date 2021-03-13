@@ -30,8 +30,8 @@ config:
 
 By default `thanos compact` will run to completion which makes it possible to execute in a cronjob. Using the arguments `--wait` and `--wait-interval=5m` it's possible to keep it running.
 
-**Compactor, Sidecar, Receive and Ruler are the only Thanos component which should have a write access to object storage,
-with only Compactor being able to delete data.**
+**Compactor, Sidecar, Receive, and Ruler are the only Thanos components that should have write access to object storage,
+with Compactor being able to delete data.**
 
 > **NOTE:** High availability for Compactor is generally not required. See [Availability](#availability) section.
 
@@ -39,12 +39,11 @@ with only Compactor being able to delete data.**
 
 The Compactor, among other things, is responsible for compacting multiple blocks into one.
 
-Why even compacting? This is a process, also done in Prometheus, to reduce number of blocks and compact index indices. We can compact
-index quite well in most cases, because series usually live longer than the duration of the smallest block, so 2 hours.
+Why even compacting? This is a process, also done in Prometheus, to reduce the number of blocks and compact index indices. We can compact index quite well in most cases, because series usually live longer than the duration of the smallest block, so 2 hours.
 
 ### Compaction Groups / Block Streams
 
-Usually those blocks come through the same source. We call blocks from a single source, a "stream" of blocks or compaction group. We distinguish streams by
+Usually, those blocks come through the same source. We call blocks from a single source, a "stream" of blocks or compaction group. We distinguish streams by
 `external labels`. Blocks with the same labels are considered as produced by a single source.
 
 This is because `external_labels` are added by the Prometheus which produced the block.
@@ -52,69 +51,64 @@ This is because `external_labels` are added by the Prometheus which produced the
 ⚠ This is why those labels on block must be both _unique_ and _persistent_ across different Prometheus instances. ⚠
 
 * By _unique_, we mean that the set of labels in a Prometheus instance must be different from all other sets of labels of
-your Prometheus instances, so that the compactor will be able to group blocks by Prometheus instance.
-* By _persistent_, we mean that one Prometheus instance must keep the same labels if it restarts, so that the compactor will keep
-compacting blocks from an instance even when a Prometheus instance goes down for some time.
+your Prometheus instances so that the compactor will be able to group blocks by Prometheus instance.
+* By _persistent_, we mean that one Prometheus instance must keep the same labels if it restarts so that the compactor will keep compacting blocks from an instance even when a Prometheus instance goes down for some time.
 
 Natively Prometheus does not store external labels anywhere. This is why external labels are added only on upload time to the `ThanosMeta` section
 of `meta.json` in each block.
 
-> **NOTE:** In default mode the state of two or more blocks having same external labels and overlapping in time is assumed as an unhealthy situation.
+> **NOTE:** In default mode the state of two or more blocks having the same external labels and overlapping in time is assumed as an unhealthy situation.
 Refer to [Overlap Issue Troubleshooting](../operating/troubleshooting.md#overlaps) for more info. This results in compactor [halting](#halting).
 
-#### Warning: Only one Instance has to run against single stream of blocks in single Object Storage.
+#### Warning: Only one Instance has to run against a single stream of blocks in single Object Storage.
 
 :warning: :warning: :warning:
 
-Because there is no safe locking mechanism for all object storage provides, currently, you need to ensure on your own that only
-single Compactor is running against single stream of blocks on single bucket. Running more can result with [Overlap Issues](../operating/troubleshooting.md#overlaps)
+Because there is no safe locking mechanism for all object storage provides, currently, you need to ensure on your own that only a single Compactor is running against a single stream of blocks on a single bucket. Running more can result with [Overlap Issues](../operating/troubleshooting.md#overlaps)
 that has to be resolved manually.
 
-This rule, means also that there could be a problem when both compacted and non compacted blocks are being uploaded by sidecar.
-This is why "upload compacted" flag is still under a separate `--shipper.upload-compacted` flag that helps to ensure that compacted blocks
-are uploaded before anything else. The singleton rule is also why local Prometheus compaction has to be disabled in order to use sidecar with upload option.
+This rule, means also that there could be a problem when both compacted and non-compacted blocks are being uploaded by sidecar.
+This is why the "upload compacted" flag is still under a separate `--shipper.upload-compacted` flag that helps to ensure that compacted blocks
+are uploaded before anything else. The singleton rule is also why local Prometheus compaction has to be disabled to use the sidecar with the upload option.
 Use hidden `--shipper.ignore-unequal-block-size` to override this check (on your own risk).
 
-> **NOTE:** In further Thanos version it's possible that both restrictions will be removed with production status of [vertical compaction](#vertical-compactions) which is worked on.
+> **NOTE:** In further Thanos version it's possible that both restrictions will be removed with the production status of [vertical compaction](#vertical-compactions), which is being worked on.
 
-You can though run multiple Compactors against single Bucket as long as for separate streams of blocks. You can do it in order to [scale compaction process](#scalability).
+You can though run multiple Compactors against a single Bucket as long as for separate streams of blocks. You can do it to [scale compaction process](#scalability).
 
 ### Vertical Compactions
 
-Thanos and Prometheus supports vertical compaction, so process of compacting multiple streams of blocks into one.
+Thanos and Prometheus support vertical compaction, so the process of compacting multiple streams of blocks into one.
 
-In Prometheus, this can be triggered by setting hidden flag in Prometheus and putting additional TSDB blocks within Prometheus
+In Prometheus, this can be triggered by setting the hidden flag in Prometheus and putting additional TSDB blocks within Prometheus
 local directory. Extra blocks can overlap with existing ones. When Prometheus detects that situation it performs `vertical compaction`
-which compacts overlapping blocks into single one. This is mainly used for **backfilling** purposes.
+which compacts overlapping blocks into a single one. This is mainly used for **backfilling** purposes.
 
-In Thanos, it works similarly, but on bigger scale and using external labels for grouping as explained in [Compaction section](#compaction).
+In Thanos, it works similarly, but on a bigger scale and using external labels for grouping as explained in [Compaction section](#compaction).
 
 In both systems, series with the same labels are merged together. Merging samples is **naive**. It works by deduplicating samples within
-exactly the same timestamps. Otherwise samples are added in sorted by time order.
+exactly the same timestamps. Otherwise, samples are added in sorted by time order.
 
-> **NOTE:** Both Prometheus and Thanos default behaviour is to fail compaction if any overlapping blocks are spotted. (For Thanos, within the same external labels).
+> **NOTE:** Both Prometheus and Thanos default behavior is to fail compaction if any overlapping blocks are spotted. (For Thanos, within the same external labels).
 
 #### Vertical Compaction Use Cases
 
 There can be few valid use cases for vertical compaction:
 
-* Races between multiple compactions, for example multiple compactors or between compactor and Prometheus compactions. While this will have extra
+* Races between multiple compactions, for example; multiple compactors or between compactor and Prometheus compactions. While this will have extra
 computation overhead for Compactor it's safe to enable vertical compaction for this case.
 * Backfilling. If you want to add blocks of data to any stream where there is existing data already there for the time range, you will need enabled vertical compaction.
 * Offline deduplication of series. It's very common to have the same data replicated into multiple streams. We can distinguish two common series duplications, `one-to-one` and `realistic`:
-  * `one-to-one` duplication is when same series (series with the same labels from different blocks) for the same range have **exactly** the same samples: Same values and timestamps.
+  * `one-to-one` duplication is when the same series (series with the same labels from different blocks) for the same range have **exactly** the same samples: Same values and timestamps.
 This is very common while using [Receivers](../components/receive.md) with replication greater than 1 as receiver replication copies exactly the same timestamps and values to different receive instances.
-  * `realistic` duplication is when same series data is **logically duplicated**. For example, it comes from the same application, but scraped by two different Prometheus-es. Ideally
-this requires more complex deduplication algorithms. For example one that is used to [deduplicate on the fly on the Querier](query.md#run-time-deduplication-of-ha-groups). This is common
-case when Prometheus HA replicas are used. [Offline deduplication for this is in progress](https://github.com/thanos-io/thanos/issues/1014).
+  * `realistic` duplication is when the same series data is **logically duplicated**. For example, it comes from the same application but scraped by two different Prometheus-es. Ideally, this requires more complex deduplication algorithms. For example one that is used to [deduplicate on the fly on the Querier](query.md#run-time-deduplication-of-ha-groups). This is a common case when Prometheus HA replicas are used. [Offline deduplication for this is in progress](https://github.com/thanos-io/thanos/issues/1014).
 
 #### Vertical Compaction Risks
 
 The main risk is the **irreversible** implications of potential configuration errors:
 
-* If you accidentally upload block with the same external labels but produced by totally different Prometheus for totally different applications, some metrics can overlap
-and potentially can merge together making such series useless.
-* If you merge disjoint series in multiple of blocks together, there is currently no easy way to split them back.
+* If you accidentally upload a block with the same external labels but produced by totally different Prometheus for totally different applications, some metrics can overlap and potentially merge together making such series useless.
+* If you merge disjoint series in multiple blocks together, there is currently no easy way to split them back.
 
 #### Enabling Vertical Compaction
 
@@ -122,7 +116,7 @@ NOTE: See [risks](#vertical-compaction-risks) section to understand the implicat
 
 You can enable vertical compaction using a hidden flag `--compact.enable-vertical-compaction`
 
-If you want to "virtually" group blocks differently for deduplication use case, use hidden flag `deduplication.replica-label` to set one or many flags to be ignored during block loading.
+If you want to "virtually" group blocks differently for the deduplication use case, use hidden flag `deduplication.replica-label` to set one or many flags to be ignored during block loading.
 
 For example if you have following set of block streams:
 
@@ -141,11 +135,11 @@ external_labels: {cluster="us1", receive="true", environment="production"}
 external_labels: {cluster="us1", receive="true", environment="staging"}
 ```
 
-On next compaction multiple streams' blocks will be compacted into one.
+On the next compaction multiple streams' blocks will be compacted into one.
 
 ## Enforcing Retention of Data
 
-By default, there is NO retention set for object storage data. This means that you store data for unlimited time, which is a valid and recommended way of running Thanos.
+By default, there is NO retention set for object storage data. This means that you store data for an unlimited time, which is a valid and recommended way of running Thanos.
 
 You can set retention by different resolutions using `--retention.resolution-raw` `--retention.resolution-5m` and `--retention.resolution-1h` flag. Not setting
 them or setting to `0s` means no retention.
@@ -154,11 +148,11 @@ them or setting to `0s` means no retention.
 
 ## Downsampling
 
-Downsampling is a process of rewriting series' to reduce overall resolution of the samples without loosing accuracy over longer time ranges.
+Downsampling is a process of rewriting series' to reduce the overall resolution of the samples without losing accuracy over longer time ranges.
 
 To learn more see [video from KubeCon 2019](https://youtu.be/qQN0N14HXPM?t=714)
 
-### TL;DR on how thanos downsampling works
+### TL;DR on how Thanos downsampling works
 
 Thanos Compactor takes "raw" resolution block and creates a new one with "downsampled" chunks. Downsampled chunk takes
 on storage level form of "AggrChunk":
@@ -177,7 +171,7 @@ message AggrChunk {
 }
 ```
 
-This means that for each series we collect various aggregations with given interval: 5m or 1h (depending on resolution)
+This means that for each series we collect various aggregations with a given interval: 5m or 1h (depending on resolution)
 This allows us to keep precision on large duration queries, without fetching too many samples.
 
 ### ⚠ ️Downsampling: Note About Resolution and Retention ⚠️
@@ -189,28 +183,26 @@ Resolution is a distance between data points on your graphs. E.g.
 * `1 hour` - data point is every 1h
 
 Keep in mind, that the initial goal of downsampling is not saving disk or object storage space. In fact, downsampling doesn't save you __any__ space but instead,
-it adds 2 more blocks for each raw block which are only slightly smaller or relatively similar size to raw block. This is done by internal downsampling implementation
+it adds 2 more blocks for each raw block which are only slightly smaller or relatively similar in size to the raw block. This is done by internal downsampling implementation
 which to be mathematically correct holds various aggregations. This means that downsampling can increase the size of your storage a bit (~3x), if you choose to store all resolutions (recommended and by default).
 
-The goal of downsampling is to provide an opportunity to get fast results for range queries of big time intervals like months or years. In other words, if you set `--retention.resolution-raw` less than `--retention.resolution-5m` and `--retention.resolution-1h` - you might run into a problem of not being able to "zoom in" to your historical data.
+The goal of downsampling is to provide an opportunity to get fast results for range queries of big-time intervals like months or years. In other words, if you set `--retention.resolution-raw` less than `--retention.resolution-5m` and `--retention.resolution-1h` - you might run into a problem of not being able to "zoom in" to your historical data.
 
-To avoid confusion - you might want to think about `raw` data as about "zoom in" opportunity. Considering the values for mentioned options - always think "Will I need to zoom in to the day 1 year ago?" if the answer "yes" - you most likely want to keep raw data for as long as 1h and 5m resolution, otherwise you'll be able to see only downsampled representation of how your raw data looked like.
+To avoid confusion - you might want to think about `raw` data as the "zoom in" opportunity. Considering the values for mentioned options - always think "Will I need to zoom in to the day 1 year ago?" if the answer "yes" - you most likely want to keep raw data for as long as 1h and 5m resolution, otherwise you'll be able to see only downsampled representation of how your raw data looked like.
 
 There's also a case when you might want to disable downsampling at all with `--downsampling.disable`. You might want to do it when you know for sure that you are not going to request long ranges of data (obviously, because without downsampling those requests are going to be much much more expensive than with it). A valid example of that case is when you only care about the last couple weeks of your data or use it only for alerting, but if that's your case - you also need to ask yourself if you want to introduce Thanos at all instead of just vanilla Prometheus?
 
-Ideally, you will have equal retention set (or no retention at all) to all resolutions which allow both "zoom in" capabilities as well as performant long ranges queries. Since object storages are usually quite cheap, storage size might not matter that much, unless your goal with thanos is somewhat very specific and you know exactly what you're doing.
+Ideally, you will have an equal retention set (or no retention at all) to all resolutions which allow both "zoom in" capabilities as well as performant long ranges queries. Since object storages are usually quite cheap, storage size might not matter that much, unless your goal with Thanos is somewhat very specific and you know exactly what you're doing.
 
-Not setting this flag, or setting it to `0d`, i.e. `--retention.resolution-X=0d`, will mean that samples at the `X` resolution level will be kept forever.
+Not setting this flag, or set it to `0d`, i.e. `--retention.resolution-X=0d`, will mean that samples at the `X` resolution level will be kept forever.
 
 Please note that blocks are only deleted after they completely "fall off" of the specified retention policy. In other words, the "max time" of a block needs to be older than the amount of time you had specified.
 
 ## Deleting Aborted Partial Uploads
 
-It can happen that any producer started uploading some block, but never finished and never will. Sidecars will retry in case of failures during upload or process (unless there was no persistent storage),
-but very common case is with Compactor. If Compactor process crashes during upload of compacted block, whole compaction starts from scratch and new block ID is created. This means that
-partial upload will be never retried.
+It can happen that any producer started uploading some block, but never finished and never will. Sidecars will retry in case of failures during upload or process (unless there was no persistent storage). If Compactor process crashes during the upload of a compacted block, the whole compaction starts from scratch and a new block ID is created. This means that a partial upload will be never retried.
 
-To handle this case there is `--delete-delay=48h` flag that starts deletion of directories inside object storage without `meta.json` only after given time.
+To handle this case there is `--delete-delay=48h` flag that starts deletion of directories inside object storage without `meta.json` only after the given time.
 
 This value has to be smaller than upload duration and [consistency delay](#consistency-delay).
 
@@ -219,7 +211,7 @@ This value has to be smaller than upload duration and [consistency delay](#consi
 Because of the very specific nature of Compactor which is writing to object storage, potentially deleting sensitive data, and downloading GBs of data, by default we halt Compactor on certain data failures.
 This means that that Compactor does not crash on halt errors, but instead is kept running and does nothing with metric `thanos_compactor_halted` set to 1.
 
-Reason is that we don't want to retry compaction and all the computations if we know that, for example, there is already overlapped state in the object storage for some reason.
+The reason is that we don't want to retry compaction and all the computations if we know that, for example, there is already overlapped state in the object storage for some reason.
 
 Hidden flag `--no-debug.halt-on-error` controls this behavior. If set, on halt error Compactor exits.
 
@@ -233,7 +225,7 @@ It's recommended to give `--compact.concurrency` amount of CPU cores.
 
 Memory usage depends on block sizes in the object storage and compaction concurrency.
 
-Generally, the maximum memory utilization is exactly the same as for Prometheus for compaction process:
+Generally, the maximum memory utilization is exactly the same as for Prometheus for the compaction process:
 
 * For each source block considered for compaction:
   * 1/32 of all block's symbols
@@ -242,8 +234,8 @@ Generally, the maximum memory utilization is exactly the same as for Prometheus 
 
 You need to multiply this with X where X is `--compaction.concurrency` (by default 1).
 
-**NOTE:** Don't check heap memory only. Prometheus and Thanos compaction leverages `mmap` heavily which is outside of `Go` `runtime` stats.
-Refer to process / OS memory used rather. On Linux/MacOS Go will also use as much as available, so utilization will be always near limit.
+**NOTE:** Don't check heap memory only. Prometheus and Thanos compaction leverage `mmap` heavily which is outside of `Go` `runtime` stats.
+Refer to process / OS memory used rather. On Linux/MacOS Go will also use as much as available, so utilization will be always near the limit.
 
 Generally, for medium-sized bucket limit of 10GB of memory should be enough to keep it working.
 
@@ -252,25 +244,24 @@ Generally, for medium-sized bucket limit of 10GB of memory should be enough to k
 Overall Compactor is the component that might have the heaviest use of network against object storage, so place it near the bucket's zone/location.
 
 It has to download each block needed for compaction / downsampling and it does that on every compaction / downsampling. It then uploads
-computed blocks. It also refreshes the state of bucket often.
+computed blocks. It also refreshes the state of the bucket often.
 
 ### Disk
 
 The compactor needs local disk space to store intermediate data for its processing as well as bucket state cache. Generally,
-for medium sized bucket about 100GB should be enough to keep working as the compacted time ranges grow over time. However, this highly depends on
-size of the blocks. In worst case scenario compactor has to have space adequate to 2 times 2 weeks (if your maximum compaction level is 2 weeks) worth of smaller blocks to
-perform compaction. First, to download all of those source blocks, second to build on disk output of 2 week block composed of those smaller ones.
+for a medium sized bucket about 100GB should be enough to keep working as the compacted time ranges grow over time. However, this highly depends on the size of the blocks. In the worst-case scenario compactor has to have space adequate to 2 times 2 weeks (if your maximum compaction level is 2 weeks) worth of smaller blocks to
+perform compaction. First, to download all of those source blocks, second to build on disk output of 2-week block composed of those smaller ones.
 
 You need to multiply this with X where X is `--compaction.concurrency` (by default 1).
 
 On-disk data is safe to delete between restarts and should be the first attempt to get crash-looping compactors unstuck.
-However, it's recommended to give the Compactor persistent disk in order to effectively use bucket state cache between restarts.
+However, it's recommended to give the Compactor persistent disk to effectively use bucket state cache between restarts.
 
 ## Availability
 
 Compactor, generally, does not need to be highly available. Compactions are needed from time to time, only when new blocks appear.
 
-The only risk is that without compactor running for longer time (weeks) you might see reduced performance of your read path due to amount of small blocks,
+The only risk is that without the compactor running for a longer time (weeks) you might see reduced performance of your read path due to amount of small blocks,
 lack of downsampled data and retention not enforced
 
 ## Scalability
@@ -284,34 +275,33 @@ and `thanos_blocks_meta_synced{state="loaded"}` constantly increasing over days.
 
 Generally there two scalability directions:
 
-1. Too many producers/sources (e.g Prometheus-es) are uploading to same object storage. Too many "streams" of work for Compactor.
+1. Too many producers/sources (e.g Prometheus-es) are uploading to the same object storage. Too many "streams" of work for Compactor.
 Compactor has to scale with the number of producers in the bucket.
 
-You should horizontally scale Compactor to cope with this using [label sharding](../sharding.md#compactor). This allows to assign
-multiple streams to each instance of compactor.
+You should horizontally scale Compactor to cope with this using [label sharding](../sharding.md#compactor). This allows assigning multiple streams to each instance of the compactor.
 
-2. TSDB blocks from single stream is too big, it takes too much time or resources.
+2. TSDB blocks from a single stream are too big, it takes too much time or resources.
 
-This is rare as first you would need to ingest that amount of data into Prometheus and it's usually not recommended to have bigger than 10 millions series
+This is rare as first you would need to ingest that amount of data into Prometheus and it's usually not recommended to have bigger than 10 million series
 in the 2 hours blocks. However, with 2 weeks blocks, potential [Vertical Compaction](#vertical-compactions) enabled and other producers than Prometheus (e.g backfilling)
-this scalability concern can appear as well. See [Limit size of blocks](https://github.com/thanos-io/thanos/issues/3068) ticket to track progress of solution if you are hitting this.
+this scalability concern can appear as well. See [Limit size of blocks](https://github.com/thanos-io/thanos/issues/3068) ticket to track the progress of the solution if you are hitting this.
 
 ## Eventual Consistency
 
-Depending on the Object Storage provider like S3, GCS, Ceph etc; we can divide the storages into strongly consistent or eventually consistent.
+Depending on the Object Storage provider like S3, GCS, Ceph, etc; we can divide the storages into strongly consistent or eventually consistent.
 Since there are no consistency guarantees provided by some Object Storage providers, we have to make sure that we have a consistent lock-free way of dealing with Object Storage irrespective of the choice of object storage.
 
 ### Consistency Delay
 
-In order to make sure we don't read partially uploaded block (or eventually visible fully in system) we established `--consistency-delay=30m` delay for all components
+To make sure we don't read partially uploaded block (or eventually visible fully in the system) we established `--consistency-delay=30m` delay for all components
 reading blocks.
 
 This means that blocks are visible / loadable for compactor (and used for retention, compaction planning, etc), only after 30m from block upload start in object storage.
 
 ### Block Deletions
 
-In order to achieve co-ordination between compactor and all object storage readers without any race, blocks are not deleted directly. Instead, blocks are marked for deletion by uploading
-`deletion-mark.json` file for the block that was chosen to be deleted. This file contains unix time of when the block was marked for deletion.
+To achieve coordination between the compactor and all object storage readers without any race, blocks are not deleted directly. Instead, blocks are marked for deletion by uploading
+`deletion-mark.json` file for the block that was chosen to be deleted. This file contains an unix time of when the block was marked for deletion.
 
 ## Flags
 
