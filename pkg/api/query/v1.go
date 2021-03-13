@@ -78,6 +78,7 @@ type QueryAPI struct {
 	enableQueryPartialResponse          bool
 	enableRulePartialResponse           bool
 	enableMetricMetadataPartialResponse bool
+	disableCORS                         bool
 
 	replicaLabels []string
 	storeSet      *query.StoreSet
@@ -104,10 +105,11 @@ func NewQueryAPI(
 	defaultRangeQueryStep time.Duration,
 	defaultInstantQueryMaxSourceResolution time.Duration,
 	defaultMetadataTimeRange time.Duration,
+	disableCORS bool,
 	gate gate.Gate,
 ) *QueryAPI {
 	return &QueryAPI{
-		baseAPI:         api.NewBaseAPI(logger, flagsMap),
+		baseAPI:         api.NewBaseAPI(logger, disableCORS, flagsMap),
 		logger:          logger,
 		queryEngine:     qe,
 		queryableCreate: c,
@@ -124,6 +126,7 @@ func NewQueryAPI(
 		defaultRangeQueryStep:                  defaultRangeQueryStep,
 		defaultInstantQueryMaxSourceResolution: defaultInstantQueryMaxSourceResolution,
 		defaultMetadataTimeRange:               defaultMetadataTimeRange,
+		disableCORS:                            disableCORS,
 	}
 }
 
@@ -131,7 +134,7 @@ func NewQueryAPI(
 func (qapi *QueryAPI) Register(r *route.Router, tracer opentracing.Tracer, logger log.Logger, ins extpromhttp.InstrumentationMiddleware, logMiddleware *logging.HTTPServerMiddleware) {
 	qapi.baseAPI.Register(r, tracer, logger, ins, logMiddleware)
 
-	instr := api.GetInstr(tracer, logger, ins, logMiddleware)
+	instr := api.GetInstr(tracer, logger, ins, logMiddleware, qapi.disableCORS)
 
 	r.Get("/query", instr("query", qapi.query))
 	r.Post("/query", instr("query", qapi.query))
@@ -247,6 +250,7 @@ func (qapi *QueryAPI) parseStep(r *http.Request, defaultRangeQueryStep time.Dura
 		if err != nil {
 			return 0, &api.ApiError{Typ: api.ErrorBadData, Err: errors.Wrapf(err, "'%s' parameter", Step)}
 		}
+		return defaultRangeQueryStep, nil
 	}
 
 	// Default step is used this way to make it consistent with UI.
