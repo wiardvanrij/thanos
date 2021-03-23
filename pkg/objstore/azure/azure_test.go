@@ -4,101 +4,32 @@
 package azure
 
 import (
+	"fmt"
 	"testing"
-
-	"github.com/thanos-io/thanos/pkg/testutil"
 )
 
+type test struct {
+	name    string
+	config  []byte
+	wantErr bool
+}
+
+var validConfig = []byte(`storage_account: "myStorageAccount"
+storage_account_key: "abc123"
+container: "MyContainer"
+endpoint: "blob.core.windows.net" 
+ready_retry_config:
+  "max_retry_requests": 100
+pipeline_retry_config:
+  "try_timeout": 0
+  `)
+
 func TestConfig_validate(t *testing.T) {
-	type fields struct {
-		StorageAccountName string
-		StorageAccountKey  string
-		ContainerName      string
-		Endpoint           string
-		MaxRetries         int
+
+	conf, err := parseConfig(validConfig)
+	if err != nil {
+		fmt.Println(err)
 	}
-	tests := []struct {
-		name         string
-		fields       fields
-		wantErr      bool
-		wantEndpoint string
-	}{
-		{
-			name: "valid global configuration",
-			fields: fields{
-				StorageAccountName: "foo",
-				StorageAccountKey:  "bar",
-				ContainerName:      "roo",
-				MaxRetries:         3,
-			},
-			wantErr:      false,
-			wantEndpoint: azureDefaultEndpoint,
-		},
-		{
-			name: "valid custom endpoint",
-			fields: fields{
-				StorageAccountName: "foo",
-				StorageAccountKey:  "bar",
-				ContainerName:      "roo",
-				Endpoint:           "blob.core.chinacloudapi.cn",
-			},
-			wantErr:      false,
-			wantEndpoint: "blob.core.chinacloudapi.cn",
-		},
-		{
-			name: "no account key but account name",
-			fields: fields{
-				StorageAccountName: "foo",
-				StorageAccountKey:  "",
-				ContainerName:      "roo",
-			},
-			wantErr: true,
-		},
-		{
-			name: "no account name but account key",
-			fields: fields{
-				StorageAccountName: "",
-				StorageAccountKey:  "bar",
-				ContainerName:      "roo",
-			},
-			wantErr: true,
-		},
-		{
-			name: "no container name",
-			fields: fields{
-				StorageAccountName: "foo",
-				StorageAccountKey:  "bar",
-				ContainerName:      "",
-			},
-			wantErr: true,
-		},
-		{
-			name: "invalid max retries (negative)",
-			fields: fields{
-				StorageAccountName: "foo",
-				StorageAccountKey:  "bar",
-				ContainerName:      "roo",
-				MaxRetries:         -3,
-			},
-			wantErr:      true,
-			wantEndpoint: azureDefaultEndpoint,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			conf := &Config{
-				StorageAccountName: tt.fields.StorageAccountName,
-				StorageAccountKey:  tt.fields.StorageAccountKey,
-				ContainerName:      tt.fields.ContainerName,
-				Endpoint:           tt.fields.Endpoint,
-				MaxRetries:         tt.fields.MaxRetries,
-			}
-			err := conf.validate()
-			if (err != nil) != tt.wantErr {
-				t.Errorf("Config.validate() error = %v, wantErr %v", err, tt.wantErr)
-			} else {
-				testutil.Equals(t, tt.wantEndpoint, conf.Endpoint)
-			}
-		})
-	}
+
+	fmt.Println(conf)
 }

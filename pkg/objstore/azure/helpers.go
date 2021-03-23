@@ -5,7 +5,10 @@ package azure
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
+	"net"
+	"net/http"
 	"net/url"
 	"regexp"
 	"time"
@@ -37,8 +40,12 @@ func getContainerURL(ctx context.Context, conf Config) (blob.ContainerURL, error
 	}
 
 	retryOptions := blob.RetryOptions{
-		MaxTries: int32(conf.MaxRetries),
+		MaxTries:      conf.PipelineRetryConfig.MaxTries,
+		TryTimeout:    time.Duration(conf.PipelineRetryConfig.TryTimeout),
+		RetryDelay:    time.Duration(conf.PipelineRetryConfig.RetryDelay),
+		MaxRetryDelay: time.Duration(conf.PipelineRetryConfig.MaxRetryDelay),
 	}
+
 	if deadline, ok := ctx.Deadline(); ok {
 		retryOptions.TryTimeout = time.Until(deadline)
 	}
@@ -54,6 +61,17 @@ func getContainerURL(ctx context.Context, conf Config) (blob.ContainerURL, error
 		Log: pipeline.LogOptions{
 			ShouldLog: nil,
 		},
+		HTTPSender: pipeline.FactoryFunc(func(next pipeline.Policy, po *pipeline.PolicyOptions) pipeline.PolicyFunc {
+			return func(ctx context.Context, request pipeline.Request) (pipeline.Response, error) {
+				client := http.Client{
+					Transport: DefaultTransport(conf),
+				}
+
+				resp, err := client.Do(request.WithContext(ctx))
+
+				return pipeline.NewHTTPResponse(resp), err
+			}
+		}),
 	})
 	u, err := url.Parse(fmt.Sprintf("https://%s.%s", conf.StorageAccountName, conf.Endpoint))
 	if err != nil {
@@ -62,6 +80,28 @@ func getContainerURL(ctx context.Context, conf Config) (blob.ContainerURL, error
 	service := blob.NewServiceURL(*u, p)
 
 	return service.NewContainerURL(conf.ContainerName), nil
+}
+
+func DefaultTransport(config Config) *http.Transport {
+	return &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+			DualStack: true,
+		}).DialContext,
+
+		MaxIdleConns:          config.HTTPConfig.MaxIdleConns,
+		MaxIdleConnsPerHost:   config.HTTPConfig.MaxIdleConnsPerHost,
+		IdleConnTimeout:       time.Duration(config.HTTPConfig.IdleConnTimeout),
+		MaxConnsPerHost:       config.HTTPConfig.MaxConnsPerHost,
+		TLSHandshakeTimeout:   time.Duration(config.HTTPConfig.TLSHandshakeTimeout),
+		ExpectContinueTimeout: time.Duration(config.HTTPConfig.ExpectContinueTimeout),
+
+		ResponseHeaderTimeout: time.Duration(config.HTTPConfig.ResponseHeaderTimeout),
+		DisableCompression:    config.HTTPConfig.DisableCompression,
+		TLSClientConfig:       &tls.Config{InsecureSkipVerify: config.HTTPConfig.InsecureSkipVerify},
+	}
 }
 
 func getContainer(ctx context.Context, conf Config) (blob.ContainerURL, error) {
