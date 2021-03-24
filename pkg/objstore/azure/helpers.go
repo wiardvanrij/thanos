@@ -15,6 +15,7 @@ import (
 
 	"github.com/Azure/azure-pipeline-go/pipeline"
 	blob "github.com/Azure/azure-storage-blob-go/azblob"
+	"github.com/Azure/go-autorest/autorest/azure/auth"
 )
 
 // DirDelim is the delimiter used to model a directory structure in an object store bucket.
@@ -33,24 +34,57 @@ func init() {
 	pipeline.SetForceLogEnabled(false)
 }
 
+func getAzureStorageCredentials(conf Config) (blob.Credential, error) {
+
+	if conf.MSIResource != "" {
+
+		msiConfig := auth.NewMSIConfig()
+		msiConfig.Resource = conf.MSIResource
+
+		azureServicePrincipalToken, err := msiConfig.ServicePrincipalToken()
+		if err != nil {
+			return nil, err
+		}
+
+		// Get a new token
+		err = azureServicePrincipalToken.Refresh()
+		if err != nil {
+			return nil, err
+		}
+		token := azureServicePrincipalToken.Token()
+
+		return blob.NewTokenCredential(token.AccessToken, nil), nil
+
+	} else {
+		credential, err := blob.NewSharedKeyCredential(conf.StorageAccountName, conf.StorageAccountKey)
+		if err != nil {
+			return nil, err
+		}
+		return credential, nil
+	}
+
+}
+
 func getContainerURL(ctx context.Context, conf Config) (blob.ContainerURL, error) {
-	c, err := blob.NewSharedKeyCredential(conf.StorageAccountName, conf.StorageAccountKey)
+
+	credentials, err := getAzureStorageCredentials(conf)
+
 	if err != nil {
 		return blob.ContainerURL{}, err
 	}
 
 	retryOptions := blob.RetryOptions{
-		MaxTries:      conf.PipelineRetryConfig.MaxTries,
-		TryTimeout:    time.Duration(conf.PipelineRetryConfig.TryTimeout),
-		RetryDelay:    time.Duration(conf.PipelineRetryConfig.RetryDelay),
-		MaxRetryDelay: time.Duration(conf.PipelineRetryConfig.MaxRetryDelay),
+		MaxTries:      conf.PipelineConfig.MaxTries,
+		TryTimeout:    time.Duration(conf.PipelineConfig.TryTimeout),
+		RetryDelay:    time.Duration(conf.PipelineConfig.RetryDelay),
+		MaxRetryDelay: time.Duration(conf.PipelineConfig.MaxRetryDelay),
 	}
 
 	if deadline, ok := ctx.Deadline(); ok {
 		retryOptions.TryTimeout = time.Until(deadline)
 	}
 
-	p := blob.NewPipeline(c, blob.PipelineOptions{
+	p := blob.NewPipeline(credentials, blob.PipelineOptions{
 		Retry:     retryOptions,
 		Telemetry: blob.TelemetryOptions{Value: "Thanos"},
 		RequestLog: blob.RequestLogOptions{
