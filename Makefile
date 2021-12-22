@@ -161,7 +161,7 @@ crossbuild: | $(PROMU)
 else
 crossbuild: | $(PROMU)
 	@echo ">> crossbuilding all binaries"
-	$(PROMU) crossbuild -v --parallelism $(CI_PARALLELISM) --parallelism-thread $(CI_PARALLELISM_THREAD)
+	$(PROMU) crossbuild -v --parallelism ${CI_PARALLELISM} --parallelism-thread ${CI_PARALLELISM_THREAD}
 endif
 
 
