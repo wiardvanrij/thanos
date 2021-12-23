@@ -146,24 +146,22 @@ react-app-start: $(REACT_APP_NODE_MODULES_PATH)
 
 .PHONY: build
 build: ## Builds Thanos binary using `promu`.
-build: check-git deps $(PROMU)
+build: $(PROMU)
 	@echo ">> building Thanos binary in $(PREFIX)"
 	@$(PROMU) build --prefix ${PREFIX}
 
 GIT_BRANCH=$(shell $(GIT) rev-parse --abbrev-ref HEAD)
 .PHONY: crossbuild
-crossbuild: ## Builds all binaries for all platforms.
+crossbuild: ## Builds multiple binaries for multiple platforms.
 ifeq ($(GIT_BRANCH), main)
 crossbuild: | $(PROMU)
 	@echo ">> crossbuilding linux/amd64 and linux/arm64 binaries"
-	# we only care about below two for the main branch
 	$(PROMU) crossbuild -v -p linux/amd64 -p linux/arm64 --parallelism ${CI_PARALLELISM} --parallelism-thread ${CI_PARALLELISM_THREAD}
 else
 crossbuild: | $(PROMU)
 	@echo ">> crossbuilding all binaries defined in .promu.yml"
 	$(PROMU) crossbuild -v --parallelism ${CI_PARALLELISM} --parallelism-thread ${CI_PARALLELISM_THREAD}
 endif
-
 
 .PHONY: deps
 deps: ## Ensures fresh go.mod and go.sum.
